@@ -54,6 +54,7 @@ class Manifest(object):
     def __init__(self, dir=None, env=os.environ, init=False):
         if not dir:
             dir = env.get('PWD') or os.getcwd()
+        log.debug("manifest init for dir: %s",dir)
         self.topdir = self.locate_topdir(dir)
         if not self.topdir:
             raise NotInManifest()
@@ -65,15 +66,24 @@ class Manifest(object):
         for line in status.rstrip('\n').split('\n'):
             if not line:
                 continue
-            sha1, path, describe = line.split(maxsplit=2)
-            # FIXME: add proper layer ordering, controllable via some in-layer
-            # priorties or something like that.
-            self.submodules.append(path)
-            if self.meta_dir_layer(path):
-                self.meta_layers.append(path)
-            elif self.lib_dir_layer(path):
-                self.lib_layers.append(path)
-                log.warning('layer ordering not implemented yet!')
+            try:
+                sha1, path, describe = line.split(maxsplit=2)
+            except ValueError:
+                #if a submodule is not initialized it returns "-${SHA} name"
+                sha1, path = line.split(maxsplit=1)
+                log.info("Submodule: '%s' not initialized - initializing",path);
+                st_init = call('git submodule update --init '+path, path=self.topdir, quiet=True)
+                l = call('git submodule status '+path, path=self.topdir, quiet=True)
+                sha1, path, describe = l.split(maxsplit=2)
+            finally:
+                # FIXME: add proper layer ordering, controllable via some in-layer
+                # priorties or something like that.
+                self.submodules.append(path)
+                if self.meta_dir_layer(path):
+                    self.meta_layers.append(path)
+                elif self.lib_dir_layer(path):
+                    self.lib_layers.append(path)
+                    log.warning('layer ordering not implemented yet!')
         if 'XD_META_PATH' in env:
             self.meta_layers = env['XD_META_PATH'].split(':')
         elif 'META_PATH' in self.config:
@@ -88,6 +98,7 @@ class Manifest(object):
 
     @classmethod
     def locate_topdir(cls, dir):
+        log.debug("locate_topdir(%s,%s)",cls,dir)
         if dir == '/':
             return None
         if not call('git rev-parse --is-inside-work-tree',
